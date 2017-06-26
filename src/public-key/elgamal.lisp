@@ -89,6 +89,8 @@
      for k = (+ 1 (strong-random (- p 2)))
      until (= 1 (gcd k (- p 1)))
      finally (return k)))
+<<<<<<< HEAD
+=======
 
 (defmethod make-message ((kind (eql :elgamal)) &key c1 c2 n-bits &allow-other-keys)
   (unless c1
@@ -119,6 +121,7 @@
                (c1 (octets-to-integer message :start 0 :end middle))
                (c2 (octets-to-integer message :start middle)))
           (list :c1 c1 :c2 c2 :n-bits n-bits)))))
+>>>>>>> glv2/master
 
 (defun elgamal-encrypt (msg key)
   (let* ((m (octets-to-integer msg))
