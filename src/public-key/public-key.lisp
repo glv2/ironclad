@@ -27,6 +27,13 @@ the specified keyword arguments."))
 value is the secret key, the second value is the public key.
 If KIND is :RSA, :ELGAMAL or :DSA, NUM-BITS must be specified."))
 
+(defgeneric make-signature (kind &key &allow-other-keys)
+  (:documentation "Build the octet vector representing a signature
+from its elements."))
+
+(defgeneric destructure-signature (kind signature)
+  (:documentation "Return a plist containing the elements of a SIGNATURE."))
+
 (defgeneric sign-message (key message &key start end &allow-other-keys)
   (:documentation "Produce a key-specific signature of MESSAGE; MESSAGE is a
 (VECTOR (UNSIGNED-BYTE 8)).  START and END bound the extent of the
@@ -36,6 +43,14 @@ message."))
   (:documentation "Verify that SIGNATURE is the signature of MESSAGE using
 KEY.  START and END bound the extent of the message."))
 
+(defgeneric make-message (kind &key &allow-other-keys)
+  (:documentation "Build the octet vector representing a message
+from its elements."))
+
+(defgeneric destructure-message (kind message)
+  (:documentation "Return a plist containing the elements of
+an encrypted MESSAGE."))
+
 (defgeneric encrypt-message (key message &key start end &allow-other-keys)
   (:documentation "Encrypt MESSAGE with KEY.  START and END bound the extent
 of the message.  Returns a fresh octet vector."))
@@ -44,11 +59,15 @@ of the message.  Returns a fresh octet vector."))
   (:documentation "Decrypt MESSAGE with KEY.  START and END bound the extent
 of the message.  Returns a fresh octet vector."))
 
+(defgeneric diffie-hellman (private-key public-key)
+  (:documentation "Compute a shared secret using Alice's PRIVATE-KEY and Bob's PUBLIC-KEY"))
+
 
 ;;; converting from integers to octet vectors
 
 (defun octets-to-integer (octet-vec &key (start 0) end (big-endian t) n-bits)
-  (declare (type (simple-array (unsigned-byte 8) (*)) octet-vec))
+  (declare (type (simple-array (unsigned-byte 8) (*)) octet-vec)
+           (optimize (speed 3) (space 0) (safety 1) (debug 0)))
   (let ((end (or end (length octet-vec))))
     (multiple-value-bind (complete-bytes extra-bits)
         (if n-bits
@@ -65,7 +84,8 @@ of the message.  Returns a fresh octet vector."))
                 sum (ash (aref octet-vec j) (* i 8)))))))
 
 (defun integer-to-octets (bignum &key (n-bits (integer-length bignum))
-                                (big-endian t))
+                                   (big-endian t))
+  (declare (optimize (speed 3) (space 0) (safety 1) (debug 0)))
   (let* ((n-bytes (ceiling n-bits 8))
          (octet-vec (make-array n-bytes :element-type '(unsigned-byte 8))))
     (declare (type (simple-array (unsigned-byte 8) (*)) octet-vec))

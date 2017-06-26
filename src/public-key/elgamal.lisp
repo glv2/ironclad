@@ -27,19 +27,50 @@
 
 (defmethod make-public-key ((kind (eql :elgamal))
                             &key p g y &allow-other-keys)
-  (unless (and p g y)
-    (error "Must specify all members of the DL group for ELGAMAL"))
+  (unless p
+    (error 'missing-key-parameter
+           :kind 'elgamal
+           :parameter 'p
+           :description "modulus"))
+  (unless g
+    (error 'missing-key-parameter
+           :kind 'elgamal
+           :parameter 'g
+           :description "generator"))
+  (unless y
+    (error 'missing-key-parameter
+           :kind 'elgamal
+           :parameter 'y
+           :description "public key"))
   (let ((group (make-instance 'discrete-logarithm-group :p p :g g)))
     (make-instance 'elgamal-public-key :group group :y y)))
 
 (defmethod make-private-key ((kind (eql :elgamal))
                              &key p g y x &allow-other-keys)
-  (unless (and p g y x)
-    (error "Must specify all members of the DL group for ELGAMAL"))
+  (unless p
+    (error 'missing-key-parameter
+           :kind 'elgamal
+           :parameter 'p
+           :description "modulus"))
+  (unless g
+    (error 'missing-key-parameter
+           :kind 'elgamal
+           :parameter 'g
+           :description "generator"))
+  (unless x
+    (error 'missing-key-parameter
+           :kind 'elgamal
+           :parameter 'x
+           :description "private key"))
   (let ((group (make-instance 'discrete-logarithm-group :p p :g g)))
-    (make-instance 'elgamal-private-key :group group :y y :x x)))
+    (make-instance 'elgamal-private-key :group group :x x :y (or y (expt-mod g x p)))))
 
 (defmethod generate-key-pair ((kind (eql :elgamal)) &key num-bits &allow-other-keys)
+  (unless num-bits
+    (error 'missing-key-parameter
+           :kind 'elgamal
+           :parameter 'num-bits
+           :description "modulus size"))
   (let* ((p (generate-safe-prime num-bits))
          (g (find-generator p))
          (x (+ 2 (strong-random (- p 3))))
@@ -47,6 +78,10 @@
     (values (make-private-key :elgamal :p p :g g :y y :x x)
             (make-public-key :elgamal :p p :g g :y y))))
 
+(declaim (notinline elgamal-generate-k))
+;; In the tests, this function is redefined to use a constant value
+;; instead of a random one. Therefore it must not be inlined or the tests
+;; will fail.
 (defun elgamal-generate-k (p)
   "Generate a random number K so that 0 < K < P - 1, and K is relatively prime to P - 1."
   (assert (> p 3))
@@ -54,6 +89,39 @@
      for k = (+ 1 (strong-random (- p 2)))
      until (= 1 (gcd k (- p 1)))
      finally (return k)))
+<<<<<<< HEAD
+=======
+
+(defmethod make-message ((kind (eql :elgamal)) &key c1 c2 n-bits &allow-other-keys)
+  (unless c1
+    (error 'missing-message-parameter
+           :kind 'elgamal
+           :parameter 'c1
+           :description "first ciphertext element"))
+  (unless c2
+    (error 'missing-message-parameter
+           :kind 'elgamal
+           :parameter 'c2
+           :description "second ciphertext element"))
+  (unless n-bits
+    (error 'missing-message-parameter
+           :kind 'elgamal
+           :parameter 'n-bits
+           :description "modulus size"))
+  (concatenate '(simple-array (unsigned-byte 8) (*))
+               (integer-to-octets c1 :n-bits n-bits)
+               (integer-to-octets c2 :n-bits n-bits)))
+
+(defmethod destructure-message ((kind (eql :elgamal)) message)
+  (let ((length (length message)))
+    (if (oddp length)
+        (error 'invalid-message-length :kind 'elgamal)
+        (let* ((middle (/ length 2))
+               (n-bits (* middle 8))
+               (c1 (octets-to-integer message :start 0 :end middle))
+               (c2 (octets-to-integer message :start middle)))
+          (list :c1 c1 :c2 c2 :n-bits n-bits)))))
+>>>>>>> glv2/master
 
 (defun elgamal-encrypt (msg key)
   (let* ((m (octets-to-integer msg))
@@ -65,18 +133,17 @@
          (c1 (expt-mod g k p))
          (c2 (mod (* m (expt-mod y k p)) p)))
     (unless (< m p)
-      (error "Message can't be bigger than the order of the DL group"))
-    (concatenate '(simple-array (unsigned-byte 8) (*))
-                 (integer-to-octets c1 :n-bits pbits)
-                 (integer-to-octets c2 :n-bits pbits))))
+      (error 'invalid-message-length :kind 'elgamal))
+    (make-message :elgamal :c1 c1 :c2 c2 :n-bits pbits)))
 
 (defun elgamal-decrypt (ciphertext key)
   (let* ((p (elgamal-key-p key))
          (pbits (integer-length p))
          (g (elgamal-key-g key))
          (x (elgamal-key-x key))
-         (c1 (octets-to-integer (subseq ciphertext 0 (/ pbits 8))))
-         (c2 (octets-to-integer (subseq ciphertext (/ pbits 8) (/ pbits 4))))
+         (message-elements (destructure-message :elgamal ciphertext))
+         (c1 (getf message-elements :c1))
+         (c2 (getf message-elements :c2))
          (m (mod (* c2 (modular-inverse (expt-mod c1 x p) p)) p)))
     (integer-to-octets m)))
 
@@ -94,24 +161,52 @@
   (let* ((p (elgamal-key-p key))
          (end (or end (length msg))))
     (unless (= (* 4 (- end start)) (integer-length p))
-      (error "Bad ciphertext length"))
+      (error 'invalid-message-length :kind 'elgamal))
     (elgamal-decrypt (subseq msg start end) key)))
+
+(defmethod make-signature ((kind (eql :elgamal)) &key r s n-bits &allow-other-keys)
+  (unless r
+    (error 'missing-signature-parameter
+           :kind 'elgamal
+           :parameter 'r
+           :description "first signature element"))
+  (unless s
+    (error 'missing-signature-parameter
+           :kind 'elgamal
+           :parameter 's
+           :description "second signature element"))
+  (unless n-bits
+    (error 'missing-signature-parameter
+           :kind 'elgamal
+           :parameter 'n-bits
+           :description "modulus size"))
+  (concatenate '(simple-array (unsigned-byte 8) (*))
+               (integer-to-octets r :n-bits n-bits)
+               (integer-to-octets s :n-bits n-bits)))
+
+(defmethod destructure-signature ((kind (eql :elgamal)) signature)
+  (let ((length (length signature)))
+    (if (oddp length)
+        (error 'invalid-signature-length :kind 'elgamal)
+        (let* ((middle (/ length 2))
+               (n-bits (* middle 8))
+               (r (octets-to-integer signature :start 0 :end middle))
+               (s (octets-to-integer signature :start middle)))
+          (list :r r :s s :n-bits n-bits)))))
 
 (defmethod sign-message ((key elgamal-private-key) msg &key (start 0) end &allow-other-keys)
   (let* ((m (octets-to-integer msg :start start :end end))
          (p (elgamal-key-p key))
          (pbits (integer-length p)))
     (unless (< m (- p 1))
-      (error "Message can't be bigger than the order of the DL group minus 1"))
+      (error 'invalid-message-length :kind 'elgamal))
     (let* ((g (elgamal-key-g key))
            (x (elgamal-key-x key))
            (k (elgamal-generate-k p))
            (r (expt-mod g k p))
            (s (mod (* (- m (* r x)) (modular-inverse k (- p 1))) (- p 1))))
       (if (not (zerop s))
-          (concatenate '(simple-array (unsigned-byte 8) (*))
-                       (integer-to-octets r :n-bits pbits)
-                       (integer-to-octets s :n-bits pbits))
+          (make-signature :elgamal :r r :s s :n-bits pbits)
           (sign-message key msg :start start :end end)))))
 
 (defmethod verify-signature ((key elgamal-public-key) msg signature &key (start 0) end &allow-other-keys)
@@ -119,14 +214,27 @@
          (p (elgamal-key-p key))
          (pbits (integer-length p)))
     (unless (= (* 4 (length signature)) pbits)
-      (error "Bad signature length"))
+      (error 'invalid-signature-length :kind 'elgamal))
     (unless (< m (- p 1))
-      (error "Message can't be bigger than the order of the DL group minus 1"))
+      (error 'invalid-message-length :kind 'elgamal))
     (let* ((g (elgamal-key-g key))
            (y (elgamal-key-y key))
-           (r (octets-to-integer (subseq signature 0 (/ pbits 8))))
-           (s (octets-to-integer (subseq  signature (/ pbits 8) (/ pbits 4)))))
+           (signature-elements (destructure-signature :elgamal signature))
+           (r (getf signature-elements :r))
+           (s (getf signature-elements :s)))
       (and (< 0 r p)
            (< 0 s (- p 1))
            (= (expt-mod g m p)
               (mod (* (expt-mod y r p) (expt-mod r s p)) p))))))
+
+(defmethod diffie-hellman ((private-key elgamal-private-key) (public-key elgamal-public-key))
+  (let ((p (elgamal-key-p private-key))
+        (p1 (elgamal-key-p public-key))
+        (g (elgamal-key-g private-key))
+        (g1 (elgamal-key-g public-key)))
+    (unless (and (= p p1) (= g g1))
+      (error 'incompatible-keys :kind 'elgamal))
+    (let ((pbits (integer-length p))
+          (x (elgamal-key-x private-key))
+          (y (elgamal-key-y public-key)))
+      (integer-to-octets (expt-mod y x p) :n-bits pbits))))

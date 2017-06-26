@@ -433,4 +433,208 @@
       (inst movdqa (nth-xmm-mem buffer 1) x1)
       (inst movdqa (nth-xmm-mem buffer 2) x2)
       (inst movdqa (nth-xmm-mem buffer 3) x3))))
+
+#+x86-64
+(define-vop (aes-ni-support-p)
+  (:translate ironclad::aes-ni-support-p)
+  (:policy :fast-safe)
+  (:conditional :c)
+  (:temporary (:sc unsigned-reg :offset rax-offset) eax)
+  (:temporary (:sc unsigned-reg :offset rcx-offset) ecx)
+  (:generator 10
+    (inst mov eax 1)
+    (inst cpuid)
+    (inst bt ecx 25)))
+
+#+x86-64
+(define-vop (aes-ni-encrypt)
+  (:translate ironclad::aes-ni-encrypt)
+  (:policy :fast-safe)
+  (:args (plaintext :scs (descriptor-reg))
+         (plaintext-start :scs (unsigned-reg))
+         (ciphertext :scs (descriptor-reg))
+         (ciphertext-start :scs (unsigned-reg))
+         (round-keys :scs (descriptor-reg))
+         (n-rounds :scs (unsigned-reg)))
+  (:arg-types simple-array-unsigned-byte-8
+              unsigned-num
+              simple-array-unsigned-byte-8
+              unsigned-num
+              simple-array-unsigned-byte-32
+              unsigned-num)
+  (:temporary (:sc double-reg) x0 x1)
+  (:generator 1000
+     (flet ((buffer-mem (base offset)
+              (make-ea :qword
+                       :base base
+                       :index offset
+                       :disp (- (* n-word-bytes vector-data-offset)
+                                other-pointer-lowtag)))
+            (round-key (i)
+              (make-ea :qword
+                       :base round-keys
+                       :disp (+ (- (* n-word-bytes vector-data-offset)
+                                   other-pointer-lowtag)
+                                (* 16 i)))))
+       (let ((last-round (gen-label)))
+         (inst movdqa x0 (buffer-mem plaintext plaintext-start))
+         (inst movdqa x1 (round-key 0))
+         (inst pxor x0 x1)
+         (inst movdqa x1 (round-key 1))
+         (inst aesenc x0 x1)
+         (inst movdqa x1 (round-key 2))
+         (inst aesenc x0 x1)
+         (inst movdqa x1 (round-key 3))
+         (inst aesenc x0 x1)
+         (inst movdqa x1 (round-key 4))
+         (inst aesenc x0 x1)
+         (inst movdqa x1 (round-key 5))
+         (inst aesenc x0 x1)
+         (inst movdqa x1 (round-key 6))
+         (inst aesenc x0 x1)
+         (inst movdqa x1 (round-key 7))
+         (inst aesenc x0 x1)
+         (inst movdqa x1 (round-key 8))
+         (inst aesenc x0 x1)
+         (inst movdqa x1 (round-key 9))
+         (inst aesenc x0 x1)
+         (inst movdqa x1 (round-key 10))
+         (inst cmp n-rounds 10)
+         (inst jmp :z last-round)
+         (inst aesenc x0 x1)
+         (inst movdqa x1 (round-key 11))
+         (inst aesenc x0 x1)
+         (inst movdqa x1 (round-key 12))
+         (inst cmp n-rounds 12)
+         (inst jmp :z last-round)
+         (inst aesenc x0 x1)
+         (inst movdqa x1 (round-key 13))
+         (inst aesenc x0 x1)
+         (inst movdqa x1 (round-key 14))
+         (emit-label last-round)
+         (inst aesenclast x0 x1)
+         (inst movdqa (buffer-mem ciphertext ciphertext-start) x0)))))
+
+#+x86-64
+(define-vop (aes-ni-decrypt)
+  (:translate ironclad::aes-ni-decrypt)
+  (:policy :fast-safe)
+  (:args (ciphertext :scs (descriptor-reg))
+         (ciphertext-start :scs (unsigned-reg))
+         (plaintext :scs (descriptor-reg))
+         (plaintext-start :scs (unsigned-reg))
+         (round-keys :scs (descriptor-reg))
+         (n-rounds :scs (unsigned-reg)))
+  (:arg-types simple-array-unsigned-byte-8
+              unsigned-num
+              simple-array-unsigned-byte-8
+              unsigned-num
+              simple-array-unsigned-byte-32
+              unsigned-num)
+  (:temporary (:sc double-reg) x0 x1)
+  (:generator 1000
+     (flet ((buffer-mem (base offset)
+              (make-ea :qword
+                       :base base
+                       :index offset
+                       :disp (- (* n-word-bytes vector-data-offset)
+                                other-pointer-lowtag)))
+            (round-key (i)
+              (make-ea :qword
+                       :base round-keys
+                       :disp (+ (- (* n-word-bytes vector-data-offset)
+                                   other-pointer-lowtag)
+                                (* 16 i)))))
+       (let ((last-round (gen-label)))
+         (inst movdqa x0 (buffer-mem ciphertext ciphertext-start))
+         (inst movdqa x1 (round-key 0))
+         (inst pxor x0 x1)
+         (inst movdqa x1 (round-key 1))
+         (inst aesdec x0 x1)
+         (inst movdqa x1 (round-key 2))
+         (inst aesdec x0 x1)
+         (inst movdqa x1 (round-key 3))
+         (inst aesdec x0 x1)
+         (inst movdqa x1 (round-key 4))
+         (inst aesdec x0 x1)
+         (inst movdqa x1 (round-key 5))
+         (inst aesdec x0 x1)
+         (inst movdqa x1 (round-key 6))
+         (inst aesdec x0 x1)
+         (inst movdqa x1 (round-key 7))
+         (inst aesdec x0 x1)
+         (inst movdqa x1 (round-key 8))
+         (inst aesdec x0 x1)
+         (inst movdqa x1 (round-key 9))
+         (inst aesdec x0 x1)
+         (inst movdqa x1 (round-key 10))
+         (inst cmp n-rounds 10)
+         (inst jmp :z last-round)
+         (inst aesdec x0 x1)
+         (inst movdqa x1 (round-key 11))
+         (inst aesdec x0 x1)
+         (inst movdqa x1 (round-key 12))
+         (inst cmp n-rounds 12)
+         (inst jmp :z last-round)
+         (inst aesdec x0 x1)
+         (inst movdqa x1 (round-key 13))
+         (inst aesdec x0 x1)
+         (inst movdqa x1 (round-key 14))
+         (emit-label last-round)
+         (inst aesdeclast x0 x1)
+         (inst movdqa (buffer-mem plaintext plaintext-start) x0)))))
+
+#+x86-64
+(define-vop (fast-blake2s-mixing)
+  (:translate ironclad::fast-blake2s-mixing)
+  (:policy :fast-safe)
+  (:args (va :scs (unsigned-reg) :target ra)
+         (vb :scs (unsigned-reg) :target rb)
+         (vc :scs (unsigned-reg) :target rc)
+         (vd :scs (unsigned-reg) :target rd)
+         (x :scs (unsigned-reg))
+         (y :scs (unsigned-reg)))
+  (:arg-types unsigned-num
+              unsigned-num
+              unsigned-num
+              unsigned-num
+              unsigned-num
+              unsigned-num)
+  (:results (ra :scs (unsigned-reg) :from (:argument 0))
+            (rb :scs (unsigned-reg) :from (:argument 1))
+            (rc :scs (unsigned-reg) :from (:argument 2))
+            (rd :scs (unsigned-reg) :from (:argument 3)))
+  (:result-types unsigned-num
+                 unsigned-num
+                 unsigned-num
+                 unsigned-num)
+  (:generator 1000
+    (let ((va (reg-in-size va :dword))
+          (vb (reg-in-size vb :dword))
+          (vc (reg-in-size vc :dword))
+          (vd (reg-in-size vd :dword))
+          (x (reg-in-size x :dword))
+          (y (reg-in-size y :dword))
+          (ra (reg-in-size ra :dword))
+          (rb (reg-in-size rb :dword))
+          (rc (reg-in-size rc :dword))
+          (rd (reg-in-size rd :dword)))
+      (move ra va)
+      (move rb vb)
+      (move rc vc)
+      (move rd vd)
+      (inst add ra rb)
+      (inst add ra x)
+      (inst xor rd ra)
+      (inst ror rd 16)
+      (inst add rc rd)
+      (inst xor rb rc)
+      (inst ror rb 12)
+      (inst add ra rb)
+      (inst add ra y)
+      (inst xor rd ra)
+      (inst ror rd 8)
+      (inst add rc rd)
+      (inst xor rb rc)
+      (inst ror rb 7))))
 )                        ; PROGN

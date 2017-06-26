@@ -20,17 +20,15 @@
     readtable))
 
 (defclass ironclad-source-file (asdf:cl-source-file) ())
-(defclass txt-file (asdf:doc-file) ((type :initform "txt")))
-(defclass css-file (asdf:doc-file) ((type :initform "css")))
 
 (asdf:defsystem :ironclad
-  :version "0.33.0"
+  :version "0.34"
   :author "Nathan Froyd <froydnj@gmail.com>"
   :maintainer "Nathan Froyd <froydnj@gmail.com>"
   :description "A cryptographic toolkit written in pure Common Lisp"
   :default-component-class ironclad-source-file
   :depends-on (#+sbcl sb-rotate-byte #+sbcl sb-posix nibbles)
-  :components ((:static-file "README")
+  :components ((:static-file "README.org")
                (:static-file "LICENSE")
                (:static-file "TODO")
                (:static-file "NEWS")
@@ -40,7 +38,7 @@
                          (:file "conditions" :depends-on ("package"))
                          (:file "util" :depends-on ("package"))
                          (:file "macro-utils" :depends-on ("package"))
-                         (:file "common" :depends-on ("package"))
+                         (:file "common" :depends-on ("package" "ccl-opt"))
                          ;; FIXME: make this depend on :FEATURE :IRONCLAD-GRAY-STREAMS
                          #+(or lispworks sbcl openmcl cmu allegro)
                          (:file "octet-stream" :depends-on ("common"))
@@ -55,11 +53,14 @@
                                   :components
                                   ((:file "fndb")
                                    (:file "x86oid-vm" :depends-on ("fndb"))))
-                         (:module "ciphers"
-                                  :depends-on ("common" "macro-utils")
+                         (:module "ccl-opt"
+                                  :depends-on ("package")
                                   :components
-                                  (
-                                   ;; block ciphers of various kinds
+                                  ((:file "x86oid-vm")))
+                         (:module "ciphers"
+                                  :depends-on ("common" "macro-utils" "sbcl-opt")
+                                  :components
+                                  (;; block ciphers of various kinds
                                    (:file "cipher")
                                    (:file "modes" :depends-on ("cipher"))
                                    (:file "make-cipher" :depends-on ("cipher"))
@@ -102,14 +103,22 @@
                                    (:file "tiger" :depends-on ("digest"))
                                    (:file "whirlpool" :depends-on ("digest"))
                                    (:file "tree-hash" :depends-on ("digest"))
-                                   (:file "skein" :depends-on ("digest"))))
+                                   (:file "skein" :depends-on ("digest"))
+                                   (:file "sha3" :depends-on ("digest"))
+                                   (:file "groestl" :depends-on ("digest"))
+                                   (:file "blake2" :depends-on ("digest"))
+                                   (:file "blake2s" :depends-on ("digest"))
+                                   (:file "jh" :depends-on ("digest"))))
                          (:module "macs"
                                   :depends-on ("common" "digests")
                                   :components
-                                  ((:file "hmac")
-                                   (:file "cmac")
-                                   (:file "skein-mac")
-                                   (:file "poly1305")))
+                                  ((:file "mac")
+                                   (:file "hmac" :depends-on ("mac"))
+                                   (:file "cmac" :depends-on ("mac"))
+                                   (:file "skein-mac" :depends-on ("mac"))
+                                   (:file "poly1305" :depends-on ("mac"))
+                                   (:file "blake2-mac" :depends-on ("mac"))
+                                   (:file "blake2s-mac" :depends-on ("mac"))))
                          (:module "public-key"
                                   :depends-on ("digests" "math")
                                   :components
@@ -118,7 +127,10 @@
                                    (:file "elgamal" :depends-on ("public-key"))
                                    (:file "rsa" :depends-on ("public-key"))
                                    (:file "pkcs1" :depends-on ("public-key"))
-                                   (:file "ed25519" :depends-on ("public-key"))))
+                                   (:file "ed25519" :depends-on ("public-key"))
+                                   (:file "ed448" :depends-on ("public-key"))
+                                   (:file "curve25519" :depends-on ("public-key"))
+                                   (:file "curve448" :depends-on ("public-key"))))
                          (:module "prng"
                                   :depends-on ("digests" "ciphers")
                                   :components
@@ -129,10 +141,7 @@
                                    (:file "generator" :depends-on ("prng"))))))
                (:module "doc"
                         :components
-                        ((:html-file "ironclad")
-                         ;; XXX ASDF bogosity
-                         (:txt-file "ironclad-doc")
-                         (:css-file "style")))))
+                        ((:html-file "ironclad")))))
 
 (defun ironclad-implementation-features ()
   #+sbcl
@@ -161,15 +170,11 @@
         (when (not (member :lispworks4 *features*))
           '(:ironclad-md5-lispworks-int32)))
   #+openmcl
-  (list :ironclad-gray-streams)
+  (list* :ironclad-gray-streams
+         (when (member :x86-64 *features*)
+           '(:ironclad-fast-mod64-arithmetic)))
   #-(or sbcl cmu allegro lispworks openmcl)
   nil)
-
-;;; Borrowed from iolib.
-(defun defknown-redefinition-error-p (error)
-  (and (typep error 'simple-error)
-       (search "overwriting old FUN-INFO"
-               (simple-condition-format-control error))))
 
 (macrolet ((do-silently (&body body)
              `(handler-bind ((style-warning #'muffle-warning)
@@ -178,8 +183,7 @@
                              ;; that we're running at compile time,
                              ;; which we don't care about the speed of
                              ;; anyway...
-                             #+sbcl (sb-ext:compiler-note #'muffle-warning)
-                             ((satisfies defknown-redefinition-error-p) #'continue))
+                             #+sbcl (sb-ext:compiler-note #'muffle-warning))
                 ,@body)))
 (defmethod asdf:perform :around ((op asdf:compile-op) (c ironclad-source-file))
   (let ((*readtable* *ironclad-readtable*)
@@ -209,12 +213,12 @@
 
 (defmethod asdf:perform ((op asdf:test-op)
                          (c (eql (asdf:find-system :ironclad))))
-  (asdf:oos 'asdf:test-op 'ironclad-tests))
+  (asdf:oos 'asdf:test-op 'ironclad/tests))
 
-(asdf:defsystem ironclad-tests
+(asdf:defsystem ironclad/tests
   :depends-on (ironclad)
-  :version "0.6"
-  :in-order-to ((asdf:test-op (asdf:load-op :ironclad-tests)))
+  :version "0.34"
+  :in-order-to ((asdf:test-op (asdf:load-op :ironclad/tests)))
   :components ((:module "testing"
                         :components
                         ((:file "rt")
@@ -266,6 +270,30 @@
                                    (:test-vector-file "skein1024-512")
                                    (:test-vector-file "skein-mac")
                                    (:test-vector-file "poly1305")
+                                   (:test-vector-file "blake2-mac")
+                                   (:test-vector-file "blake2s-mac")
+                                   (:test-vector-file "sha3")
+                                   (:test-vector-file "sha3-224")
+                                   (:test-vector-file "sha3-256")
+                                   (:test-vector-file "sha3-384")
+                                   (:test-vector-file "shake128")
+                                   (:test-vector-file "shake256")
+                                   (:test-vector-file "groestl")
+                                   (:test-vector-file "groestl-224")
+                                   (:test-vector-file "groestl-256")
+                                   (:test-vector-file "groestl-384")
+                                   (:test-vector-file "blake2")
+                                   (:test-vector-file "blake2-160")
+                                   (:test-vector-file "blake2-256")
+                                   (:test-vector-file "blake2-384")
+                                   (:test-vector-file "blake2s")
+                                   (:test-vector-file "blake2s-128")
+                                   (:test-vector-file "blake2s-160")
+                                   (:test-vector-file "blake2s-224")
+                                   (:test-vector-file "jh")
+                                   (:test-vector-file "jh-224")
+                                   (:test-vector-file "jh-256")
+                                   (:test-vector-file "jh-384")
                                    ;; block ciphers of various kinds
                                    (:test-vector-file "null")
                                    (:test-vector-file "aes")
@@ -307,10 +335,14 @@
                                    (:test-vector-file "rsa-sig")
                                    (:test-vector-file "elgamal-enc")
                                    (:test-vector-file "elgamal-sig")
+                                   (:test-vector-file "elgamal-dh")
                                    (:test-vector-file "dsa")
-                                   (:test-vector-file "ed25519")))))))
+                                   (:test-vector-file "ed25519")
+                                   (:test-vector-file "ed448")
+                                   (:test-vector-file "curve25519")
+                                   (:test-vector-file "curve448")))))))
 
 (defmethod asdf:perform ((op asdf:test-op)
-                         (c (eql (asdf:find-system :ironclad-tests))))
+                         (c (eql (asdf:find-system :ironclad/tests))))
   (or (funcall (intern "DO-TESTS" (find-package "RTEST")))
-      (error "TEST-OP failed for IRONCLAD-TESTS")))
+      (error "TEST-OP failed for IRONCLAD/TESTS")))

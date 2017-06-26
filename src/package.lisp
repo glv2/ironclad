@@ -15,6 +15,10 @@
    #:digest-sequence #:digest-stream #:digest-file
    #:make-digest #:copy-digest #:update-digest #:produce-digest
 
+   ;; MACs
+   #:make-mac #:update-mac #:produce-mac
+
+   ;;; Deprecated MAC functions
    ;; HMACs
    #:make-hmac #:update-hmac #:hmac-digest
    ;; CMACs
@@ -23,10 +27,15 @@
    #:make-skein-mac #:update-skein-mac #:skein-mac-digest
    ;; Poly1305
    #:make-poly1305 #:update-poly1305 #:poly1305-digest
+   ;; Blake2-MAC
+   #:make-blake2-mac #:update-blake2-mac #:blake2-mac-digest
+   ;; Blake2s-MAC
+   #:make-blake2s-mac #:update-blake2s-mac #:blake2s-mac-digest
 
    ;; introspection
    #:cipher-supported-p #:list-all-ciphers
    #:digest-supported-p #:list-all-digests
+   #:mac-supported-p #:list-all-macs
    #:mode-supported-p #:list-all-modes
    #:block-length #:digest-length #:key-lengths
 
@@ -47,8 +56,11 @@
 
    ;; public-key encryption operations
    #:make-public-key #:make-private-key #:generate-key-pair
+   #:make-signature #:destructure-signature
+   #:make-message #:destructure-message
    #:sign-message #:verify-signature
    #:encrypt-message #:decrypt-message
+   #:diffie-hellman
 
    ;; public-key encryption/signature padding
    #:oaep-encode #:oaep-decode #:pss-encode #:pss-verify
@@ -58,6 +70,9 @@
    #:elgamal-key-p #:elgamal-key-g #:elgamal-key-y #:elgamal-key-x
    #:rsa-key-modulus #:rsa-key-exponent
    #:ed25519-key-x #:ed25519-key-y
+   #:ed448-key-x #:ed448-key-y
+   #:curve25519-key-x #:curve25519-key-y
+   #:curve448-key-x #:curve448-key-y
 
    ;; pseudo-random number generators
    #:list-all-prngs #:make-prng #:random-data #:read-os-random-seed
@@ -82,12 +97,19 @@
    #:unsupported-cipher #:unsupported-mode #:unsupported-digest
    #:unsupported-kdf #:unsupported-scrypt-cost-factors
    #:insufficient-buffer-space #:invalid-padding
-   #:key-not-supplied
+   #:key-not-supplied #:unsupported-mac
+   #:invalid-mac-parameter #:invalid-signature-length
+   #:invalid-message-length #:missing-key-parameter
+   #:missing-message-parameter #:missing-signature-parameter
+   #:incompatible-keys #:invalid-curve-point
+   #:invalid-public-key-length #:oaep-decoding-error
 
    ;; utilities
    #:byte-array-to-hex-string #:hex-string-to-byte-array
    #:ascii-string-to-byte-array
-   #:octets-to-integer #:integer-to-octets #:expt-mod #:expt-mod/unsafe
+   #:octets-to-integer #:integer-to-octets
+   #:expt-mod #:expt-mod/unsafe
+   #:constant-time-equal
 
    ;; streams
    #:make-octet-input-stream #:make-octet-output-stream
@@ -104,7 +126,15 @@
            #:skein256 #:skein256/128 #:skein256/160 #:skein256/224
            #:skein512 #:skein512/128 #:skein512/160 #:skein512/224
            #:skein512/256 #:skein512/384
-           #:skein1024 #:skein1024/384 #:skein1024/512)
+           #:skein1024 #:skein1024/384 #:skein1024/512
+           #:sha3 #:sha3/384 #:sha3/256 #:sha3/224
+           #:shake128 #:shake256
+           #:groestl #:groestl/384 #:groestl/256 #:groestl/224
+           #:blake2 #:blake2/384 #:blake2/256 #:blake2/160
+           #:blake2s #:blake2s/224 #:blake2s/160 #:blake2s/128
+           #:jh #:jh/384 #:jh/256 #:jh/224)
+  ;; supported macs
+  (:export #:blake2-mac #:blake2s-mac #:cmac #:hmac #:poly1305 #:skein-mac)
   ;; supported block ciphers
   (:export #:blowfish #:tea #:xtea #:square #:rc2 #:rc5 #:rc6 #:des #:3des
            #:aes #:twofish #:cast5 #:idea #:misty1 #:null

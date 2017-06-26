@@ -178,9 +178,16 @@
       (error "individual bit test ~A digest of (~D #x~2,'0X ~D) failed"
              digest-name leading byte trailing))))
 
+(defun xof-digest-test (digest-name output-length input expected-digest)
+  (let* ((digest (crypto:make-digest digest-name :output-length output-length))
+         (result (crypto:digest-sequence digest input)))
+    (when (mismatch result expected-digest)
+      (error "one-shot ~A xof digest of ~S failed" digest-name input))))
+
 (defparameter *digest-tests*
   (list (cons :digest-test 'digest-test/base)
-        (cons :digest-bit-test 'digest-bit-test)))
+        (cons :digest-bit-test 'digest-bit-test)
+        (cons :xof-digest-test 'xof-digest-test)))
 
 (defun ignore-test (&rest args)
   (declare (ignore args))
@@ -188,90 +195,139 @@
 
 (defparameter *digest-incremental-tests*
   (list (cons :digest-test 'digest-test/incremental)
-        (cons :digest-bit-test 'ignore-test)))
+        (cons :digest-bit-test 'ignore-test)
+        (cons :xof-digest-test 'ignore-test)))
 
 #+(or sbcl cmucl)
 (defparameter *digest-fill-pointer-tests*
   (list (cons :digest-test 'digest-test/fill-pointer)
-        (cons :digest-bit-test 'ignore-test)))
+        (cons :digest-bit-test 'ignore-test)
+        (cons :xof-digest-test 'ignore-test)))
 
 #+(or lispworks sbcl cmucl openmcl allegro)
 (defparameter *digest-stream-tests*
   (list (cons :digest-test 'digest-test/stream)
-        (cons :digest-bit-test 'ignore-test)))
+        (cons :digest-bit-test 'ignore-test)
+        (cons :xof-digest-test 'ignore-test)))
 
 (defparameter *digest-reinitialize-instance-tests*
   (list (cons :digest-test 'digest-test/reinitialize-instance)
-        (cons :digest-bit-test 'ignore-test)))
+        (cons :digest-bit-test 'ignore-test)
+        (cons :xof-digest-test 'ignore-test)))
 
 
 ;;; mac testing routines
 
 (defun hmac-test (name digest-name key data expected-digest)
   (declare (ignore name))
-  (let ((hmac (ironclad:make-hmac key digest-name)))
-    (ironclad:update-hmac hmac data)
-    (when (mismatch expected-digest (ironclad:hmac-digest hmac))
+  (let ((hmac (ironclad:make-mac :hmac key digest-name)))
+    (ironclad:update-mac hmac data)
+    (when (mismatch expected-digest (ironclad:produce-mac hmac))
       (error "HMAC/~A failed on key ~A, input ~A, output ~A"
              digest-name key data expected-digest))
     (loop
        initially (reinitialize-instance hmac :key key)
        for i from 0 below (length data)
-       do (ironclad:update-hmac hmac data :start i :end (1+ i))
-       (ironclad:hmac-digest hmac)
-       finally (when (mismatch expected-digest (ironclad:hmac-digest hmac))
+       do (ironclad:update-mac hmac data :start i :end (1+ i))
+       (ironclad:produce-mac hmac)
+       finally (when (mismatch expected-digest (ironclad:produce-mac hmac))
                  (error "progressive HMAC/~A failed on key ~A, input ~A, output ~A"
                         digest-name key data expected-digest)))))
 
 (defun cmac-test (name cipher-name key data expected-digest)
   (declare (ignore name))
-  (let ((cmac (ironclad:make-cmac key cipher-name)))
-    (ironclad:update-cmac cmac data)
-    (when (mismatch expected-digest (ironclad:cmac-digest cmac))
+  (let ((cmac (ironclad:make-mac :cmac key cipher-name)))
+    (ironclad:update-mac cmac data)
+    (when (mismatch expected-digest (ironclad:produce-mac cmac))
       (error "CMAC/~A failed on key ~A, input ~A, output ~A"
-             cipher-name key data expected-digest))))
+             cipher-name key data expected-digest))
+    (loop
+       initially (reinitialize-instance cmac :key key)
+       for i from 0 below (length data)
+       do (ironclad:update-mac cmac data :start i :end (1+ i))
+       (ironclad:produce-mac cmac)
+       finally (when (mismatch expected-digest (ironclad:produce-mac cmac))
+                 (error "progressive CMAC/~A failed on key ~A, input ~A, output ~A"
+                        cipher-name key data expected-digest)))))
 
 (defun skein-mac-test (name block-length digest-length key data expected-digest)
   (declare (ignore name))
-  (let ((mac (ironclad:make-skein-mac key
-                                      :block-length block-length
-                                      :digest-length digest-length)))
-    (ironclad:update-skein-mac mac data)
-    (when (mismatch expected-digest (ironclad:skein-mac-digest mac))
+  (let ((mac (ironclad:make-mac :skein-mac
+                                key
+                                :block-length block-length
+                                :digest-length digest-length)))
+    (ironclad:update-mac mac data)
+    (when (mismatch expected-digest (ironclad:produce-mac mac))
       (error "SKEIN-MAC(~A/~A) failed on key ~A, input ~A, output ~A"
              block-length digest-length key data expected-digest))
     (loop
        initially (reinitialize-instance mac :key key)
        for i from 0 below (length data)
        do (progn
-            (ironclad:update-skein-mac mac data :start i :end (1+ i))
-            (ironclad:skein-mac-digest mac))
-       finally (when (mismatch expected-digest (ironclad:skein-mac-digest mac))
+            (ironclad:update-mac mac data :start i :end (1+ i))
+            (ironclad:produce-mac mac))
+       finally (when (mismatch expected-digest (ironclad:produce-mac mac))
                  (error "progressive SKEIN-MAC(~A/~A) failed on key ~A, input ~A, output ~A"
                         block-length digest-length key data expected-digest)))))
 
 (defun poly1305-test (name key data expected-digest)
   (declare (ignore name))
-  (let ((mac (ironclad:make-poly1305 key)))
-    (ironclad:update-poly1305 mac data)
-    (when (mismatch expected-digest (ironclad:poly1305-digest mac))
+  (let ((mac (ironclad:make-mac :poly1305 key)))
+    (ironclad:update-mac mac data)
+    (when (mismatch expected-digest (ironclad:produce-mac mac))
       (error "POLY1305 failed on key ~A, input ~A, output ~A"
              key data expected-digest))
     (loop
        initially (reinitialize-instance mac :key key)
        for i from 0 below (length data)
        do (progn
-            (ironclad:update-poly1305 mac data :start i :end (1+ i))
-            (ironclad:poly1305-digest mac))
-       finally (when (mismatch expected-digest (ironclad:poly1305-digest mac))
+            (ironclad:update-mac mac data :start i :end (1+ i))
+            (ironclad:produce-mac mac))
+       finally (when (mismatch expected-digest (ironclad:produce-mac mac))
                  (error "progressive POLY1305 failed on key ~A, input ~A, output ~A"
+                        key data expected-digest)))))
+
+(defun blake2-mac-test (name key data expected-digest)
+  (declare (ignore name))
+  (let ((mac (ironclad:make-mac :blake2-mac key)))
+    (ironclad:update-mac mac data)
+    (when (mismatch expected-digest (ironclad:produce-mac mac))
+      (error "BLAKE2-MAC failed on key ~A, input ~A, output ~A"
+             key data expected-digest))
+    (loop
+       initially (reinitialize-instance mac :key key)
+       for i from 0 below (length data)
+       do (progn
+            (ironclad:update-mac mac data :start i :end (1+ i))
+            (ironclad:produce-mac mac))
+       finally (when (mismatch expected-digest (ironclad:produce-mac mac))
+                 (error "progressive BLAKE2-MAC failed on key ~A, input ~A, output ~A"
+                        key data expected-digest)))))
+
+(defun blake2s-mac-test (name key data expected-digest)
+  (declare (ignore name))
+  (let ((mac (ironclad:make-mac :blake2s-mac key)))
+    (ironclad:update-mac mac data)
+    (when (mismatch expected-digest (ironclad:produce-mac mac))
+      (error "BLAKE2S-MAC failed on key ~A, input ~A, output ~A"
+             key data expected-digest))
+    (loop
+       initially (reinitialize-instance mac :key key)
+       for i from 0 below (length data)
+       do (progn
+            (ironclad:update-mac mac data :start i :end (1+ i))
+            (ironclad:produce-mac mac))
+       finally (when (mismatch expected-digest (ironclad:produce-mac mac))
+                 (error "progressive BLAKE2S-MAC failed on key ~A, input ~A, output ~A"
                         key data expected-digest)))))
 
 (defparameter *mac-tests*
   (list (cons :hmac-test 'hmac-test)
         (cons :cmac-test 'cmac-test)
         (cons :skein-mac-test 'skein-mac-test)
-        (cons :poly1305-test 'poly1305-test)))
+        (cons :poly1305-test 'poly1305-test)
+        (cons :blake2-mac-test 'blake2-mac-test)
+        (cons :blake2s-mac-test 'blake2s-mac-test)))
 
 
 ;;; PRNG testing routines
@@ -306,7 +362,7 @@
 
 (defun rsa-oaep-encryption-test (name n e d input seed output)
   ;; Redefine oaep-encode to use a defined seed for the test instead of a random one
-  (setf (symbol-function 'ironclad:oaep-encode)
+  (setf (symbol-function 'ironclad::oaep-encode)
         (lambda (digest-name message num-bytes &optional label)
           (let ((digest-len (ironclad:digest-length digest-name)))
             (assert (<= (length message) (- num-bytes (* 2 digest-len) 2)))
@@ -353,7 +409,7 @@
 
 (defun rsa-pss-signature-test (name n e d input salt signature)
   ;; Redefine pss-encode to use a defined salt for the test instead of a random one
-  (setf (symbol-function 'ironclad:pss-encode)
+  (setf (symbol-function 'ironclad::pss-encode)
         (lambda (digest-name message num-bytes)
           (let ((digest-len (ironclad:digest-length digest-name)))
             (assert (>= num-bytes (+ (* 2 digest-len) 2)))
@@ -424,6 +480,59 @@
       (error "signature verification failed for ~A on pkey ~A, input ~A, signature ~A"
              name pkey input signature))))
 
+(defun ed448-signature-test (name skey pkey input signature)
+  (let* ((sk (ironclad:make-private-key :ed448 :x skey :y pkey))
+         (pk (ironclad:make-public-key :ed448 :y pkey))
+         (s (ironclad:sign-message sk input)))
+    (when (mismatch s signature)
+      (error "signature failed for ~A on skey ~A, input ~A, signature ~A"
+             name skey input signature))
+    (unless (ironclad:verify-signature pk input signature)
+      (error "signature verification failed for ~A on pkey ~A, input ~A, signature ~A"
+             name pkey input signature))))
+
+(defun curve25519-dh-test (name skey1 pkey1 skey2 pkey2 shared-secret)
+  (let* ((sk1 (ironclad:make-private-key :curve25519 :x skey1 :y pkey1))
+         (pk1 (ironclad:make-public-key :curve25519 :y pkey1))
+         (sk2 (ironclad:make-private-key :curve25519 :x skey2 :y pkey2))
+         (pk2 (ironclad:make-public-key :curve25519 :y pkey2))
+         (ss1 (ironclad:diffie-hellman sk1 pk2))
+         (ss2 (ironclad:diffie-hellman sk2 pk1)))
+    (when (mismatch ss1 shared-secret)
+      (error "shared secret computation failed for ~A on skey ~A, pkey ~A, secret ~A"
+             name skey1 pkey2 shared-secret))
+    (when (mismatch ss2 shared-secret)
+      (error "shared secret computation failed for ~A on skey ~A, pkey ~A, secret ~A"
+             name skey2 pkey1 shared-secret))))
+
+(defun curve448-dh-test (name skey1 pkey1 skey2 pkey2 shared-secret)
+  (let* ((sk1 (ironclad:make-private-key :curve448 :x skey1 :y pkey1))
+         (pk1 (ironclad:make-public-key :curve448 :y pkey1))
+         (sk2 (ironclad:make-private-key :curve448 :x skey2 :y pkey2))
+         (pk2 (ironclad:make-public-key :curve448 :y pkey2))
+         (ss1 (ironclad:diffie-hellman sk1 pk2))
+         (ss2 (ironclad:diffie-hellman sk2 pk1)))
+    (when (mismatch ss1 shared-secret)
+      (error "shared secret computation failed for ~A on skey ~A, pkey ~A, secret ~A"
+             name skey1 pkey2 shared-secret))
+    (when (mismatch ss2 shared-secret)
+      (error "shared secret computation failed for ~A on skey ~A, pkey ~A, secret ~A"
+             name skey2 pkey1 shared-secret))))
+
+(defun elgamal-dh-test (name p g skey1 pkey1 skey2 pkey2 shared-secret)
+  (let* ((sk1 (ironclad:make-private-key :elgamal :p p :g g :x skey1 :y pkey1))
+         (pk1 (ironclad:make-public-key :elgamal :p p :g g :y pkey1))
+         (sk2 (ironclad:make-private-key :elgamal :p p :g g :x skey2 :y pkey2))
+         (pk2 (ironclad:make-public-key :elgamal :p p :g g :y pkey2))
+         (ss1 (ironclad:diffie-hellman sk1 pk2))
+         (ss2 (ironclad:diffie-hellman sk2 pk1)))
+    (when (mismatch ss1 shared-secret)
+      (error "shared secret computation failed for ~A on skey ~A, pkey ~A, secret ~A"
+             name skey1 pkey2 shared-secret))
+    (when (mismatch ss2 shared-secret)
+      (error "shared secret computation failed for ~A on skey ~A, pkey ~A, secret ~A"
+             name skey2 pkey1 shared-secret))))
+
 (defparameter *public-key-encryption-tests*
   (list (cons :rsa-oaep-encryption-test 'rsa-oaep-encryption-test)
         (cons :elgamal-encryption-test 'elgamal-encryption-test)))
@@ -432,4 +541,10 @@
   (list (cons :rsa-pss-signature-test 'rsa-pss-signature-test)
         (cons :elgamal-signature-test 'elgamal-signature-test)
         (cons :dsa-signature-test 'dsa-signature-test)
-        (cons :ed25519-signature-test 'ed25519-signature-test)))
+        (cons :ed25519-signature-test 'ed25519-signature-test)
+        (cons :ed448-signature-test 'ed448-signature-test)))
+
+(defparameter *public-key-diffie-hellman-tests*
+  (list (cons :curve25519-dh-test 'curve25519-dh-test)
+        (cons :curve448-dh-test 'curve448-dh-test)
+        (cons :elgamal-dh-test 'elgamal-dh-test)))
